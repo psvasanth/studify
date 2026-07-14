@@ -687,7 +687,7 @@ function QuizDashboard({ quiz, setQuiz, accent }) {
             {q.a} <span className={ACCENTS[accent].text}>×</span> {q.b}
           </p>
 
-          <div className="flex w-full max-w-[300px]">
+          <div className="w-full max-w-[300px] flex flex-col gap-3">
             <input
               key={session.index}
               type="number"
@@ -697,11 +697,12 @@ function QuizDashboard({ quiz, setQuiz, accent }) {
               onChange={(e) => setSession((s) => ({ ...s, input: e.target.value }))}
               onKeyDown={(e) => e.key === "Enter" && submit(false)}
               placeholder="?"
-              className="flex-1 h-14 rounded-l-2xl border-2 border-r-0 border-zinc-700 bg-zinc-900 text-center text-2xl font-bold text-zinc-100 outline-none focus:border-zinc-500"
+              className="w-full h-14 rounded-2xl border-2 border-zinc-700 bg-zinc-900 text-center text-2xl font-bold text-zinc-100 outline-none focus:border-zinc-500"
             />
             <TapButton
               onClick={() => submit(false)}
-              className={`px-5 rounded-r-2xl font-semibold text-zinc-950 ${ACCENTS[accent].bg}`}
+              className={`w-full h-14 rounded-2xl font-semibold text-zinc-950 ${ACCENTS[accent].bg}`}
+              style={glowStyle(accentHex, 0.35)}
             >
               Enter
             </TapButton>
@@ -910,88 +911,6 @@ function StudyDashboard({ study, setStudy, accent }) {
 
   return (
     <div className="pb-6">
-      {/* Progress overview */}
-      <Card className="mb-4">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <BarChart3 size={16} className={ACCENTS[accent].text} />
-            <p className="text-sm font-medium text-zinc-300">Hours by subject</p>
-          </div>
-          <TapButton
-            onClick={() => setAllTime((v) => !v)}
-            className={`h-8 px-3 rounded-lg text-[11px] font-semibold border ${
-              allTime
-                ? `${ACCENTS[accent].bgSoft2} ${ACCENTS[accent].borderBright} ${ACCENTS[accent].textBright}`
-                : "border-zinc-800 text-zinc-500"
-            }`}
-          >
-            All time
-          </TapButton>
-        </div>
-
-        {!allTime && (
-          <input
-            type="date"
-            value={chartDate}
-            max={todayISO()}
-            onChange={(e) => setChartDate(e.target.value)}
-            className="w-full h-11 rounded-xl bg-zinc-950 border border-zinc-800 px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600 mb-5"
-          />
-        )}
-
-        <div className="flex items-center gap-6">
-          <svg width="140" height="140" viewBox="0 0 140 140" className="shrink-0 -rotate-90">
-            <circle cx="70" cy="70" r="58" fill="none" stroke="#27272a" strokeWidth="16" />
-            {(() => {
-              const r = 58;
-              const circumference = 2 * Math.PI * r;
-              let offset = 0;
-              return SUBJECT_LIST.filter((s) => totals[s] > 0).map((s) => {
-                const frac = totalAllSubjects > 0 ? totals[s] / totalAllSubjects : 0;
-                const dash = frac * circumference;
-                const el = (
-                  <circle
-                    key={s}
-                    cx="70"
-                    cy="70"
-                    r={r}
-                    fill="none"
-                    stroke={SUBJECT_COLORS[s].hex}
-                    strokeWidth="16"
-                    strokeDasharray={`${dash} ${circumference - dash}`}
-                    strokeDashoffset={-offset}
-                    strokeLinecap="butt"
-                  />
-                );
-                offset += dash;
-                return el;
-              });
-            })()}
-          </svg>
-
-          <div className="flex-1 min-w-0">
-            <p className="text-[11px] text-zinc-500 mb-0.5">
-              Total {allTime ? "(all time)" : `· ${prettyDay(chartDate)}`}
-            </p>
-            <p className="text-3xl font-bold text-zinc-50 mb-3">{totalAllSubjects.toFixed(1)}h</p>
-            <div className="space-y-1.5">
-              {SUBJECT_LIST.map((s) => (
-                <div key={s} className="flex items-center justify-between text-xs">
-                  <span className="flex items-center gap-1.5 text-zinc-400">
-                    <span
-                      className="w-2 h-2 rounded-full shrink-0"
-                      style={{ backgroundColor: SUBJECT_COLORS[s].hex }}
-                    />
-                    {s}
-                  </span>
-                  <span className="text-zinc-300 font-medium">{totals[s].toFixed(1)}h</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </Card>
-
       {/* Logger */}
       <Card className="mb-4">
         <p className="text-sm font-medium text-zinc-300 mb-3">Log a session</p>
@@ -1063,6 +982,56 @@ function StudyDashboard({ study, setStudy, accent }) {
           <Plus size={18} />
           Log session
         </TapButton>
+      </Card>
+
+      {/* Hours by subject */}
+      <Card className="mb-4">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <BarChart3 size={16} className={ACCENTS[accent].text} />
+            <p className="text-sm font-medium text-zinc-300">Hours by subject</p>
+          </div>
+          <TapButton
+            onClick={() => setAllTime((v) => !v)}
+            className={`h-8 px-3 rounded-lg text-[11px] font-semibold border ${
+              allTime
+                ? `${ACCENTS[accent].bgSoft2} ${ACCENTS[accent].borderBright} ${ACCENTS[accent].textBright}`
+                : "border-zinc-800 text-zinc-500"
+            }`}
+          >
+            All time
+          </TapButton>
+        </div>
+
+        {!allTime && (
+          <input
+            type="date"
+            value={chartDate}
+            max={todayISO()}
+            onChange={(e) => setChartDate(e.target.value)}
+            className="w-full h-11 rounded-xl bg-zinc-950 border border-zinc-800 px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600 mb-4"
+          />
+        )}
+
+        <p className="text-[11px] text-zinc-500 mb-0.5">
+          Total {allTime ? "(all time)" : `· ${prettyDay(chartDate)}`}
+        </p>
+        <p className="text-3xl font-bold text-zinc-50 mb-4">{totalAllSubjects.toFixed(1)}h</p>
+
+        <div className="space-y-2">
+          {SUBJECT_LIST.map((s) => (
+            <div key={s} className="flex items-center justify-between text-sm">
+              <span className="flex items-center gap-2 text-zinc-400">
+                <span
+                  className="w-2 h-2 rounded-full shrink-0"
+                  style={{ backgroundColor: SUBJECT_COLORS[s].hex }}
+                />
+                {s}
+              </span>
+              <span className="text-zinc-200 font-medium">{totals[s].toFixed(1)}h</span>
+            </div>
+          ))}
+        </div>
       </Card>
 
       {/* Manage sub-subjects */}
@@ -1383,15 +1352,6 @@ function ExerciseDashboard({ exercise, setExercise, accent }) {
     return totals;
   }, [exercise.logs, timeframe, allTypes]);
 
-  const deleteType = (name) => {
-    setExercise((ex) => ({
-      ...ex,
-      customTypes: ex.customTypes.filter((t) => t !== name),
-      deletedTypes: [...(ex.deletedTypes || []), name],
-    }));
-    if (selType === name) setSelType((allTypes.find((t) => t !== name)) || "");
-  };
-
   const accentHex = ACCENT_HEX[accent];
 
   return (
@@ -1644,14 +1604,8 @@ function ExerciseDashboard({ exercise, setExercise, accent }) {
           {allTypes.map((t) => (
             <div
               key={t}
-              className={`shrink-0 relative rounded-2xl border ${ACCENTS[accent].border} ${ACCENTS[accent].bgSoft} px-4 py-3 text-center min-w-[92px]`}
+              className={`shrink-0 rounded-2xl border ${ACCENTS[accent].border} ${ACCENTS[accent].bgSoft} px-4 py-3 text-center min-w-[92px]`}
             >
-              <TapButton
-                onClick={() => deleteType(t)}
-                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-400"
-              >
-                <X size={10} />
-              </TapButton>
               <p className="text-[10px] text-zinc-500 mb-1 whitespace-nowrap">{t}</p>
               <p className={`text-xl font-bold ${ACCENTS[accent].textBright}`}>
                 {analyticsTotals[t]}
@@ -1666,6 +1620,12 @@ function ExerciseDashboard({ exercise, setExercise, accent }) {
 
 function SettingsDashboard({ profile, setProfile, accent, onReset }) {
   const [confirmReset, setConfirmReset] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
+
+  const handleSave = () => {
+    setJustSaved(true);
+    setTimeout(() => setJustSaved(false), 1800);
+  };
 
   return (
     <div className="pb-6">
@@ -1676,12 +1636,31 @@ function SettingsDashboard({ profile, setProfile, accent, onReset }) {
           onChange={(e) => setProfile((p) => ({ ...p, name: e.target.value }))}
           className="w-full h-12 rounded-xl bg-zinc-950 border border-zinc-800 px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600 mb-4"
         />
-        <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-2">Target exam</p>
+        <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-2">About</p>
         <input
           value={profile.targetExam}
           onChange={(e) => setProfile((p) => ({ ...p, targetExam: e.target.value }))}
-          className="w-full h-12 rounded-xl bg-zinc-950 border border-zinc-800 px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+          placeholder="A short line about you or your goal"
+          className="w-full h-12 rounded-xl bg-zinc-950 border border-zinc-800 px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600 mb-4"
         />
+        <TapButton
+          onClick={handleSave}
+          className={`w-full h-12 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors ${
+            justSaved
+              ? "bg-emerald-500 text-zinc-950"
+              : `text-zinc-950 ${ACCENTS[accent].bg}`
+          }`}
+          style={!justSaved ? glowStyle(ACCENT_HEX[accent], 0.3) : undefined}
+        >
+          {justSaved ? (
+            <>
+              <Check size={16} />
+              Saved!
+            </>
+          ) : (
+            "Save"
+          )}
+        </TapButton>
       </CollapsibleCard>
 
       <CollapsibleCard
@@ -1850,9 +1829,11 @@ export default function App() {
         {/* Top status spacer + header */}
         <div style={{ paddingTop: "env(safe-area-inset-top)" }}>
           <div className="px-5 pt-4 pb-3 flex items-center justify-center relative">
-            <p className="studify-display text-base font-bold text-zinc-100 tracking-tight text-center">
-              {data.profile.targetExam || "Set target exam"}
-            </p>
+            {data.profile.targetExam && (
+              <p className="studify-display text-base font-bold text-zinc-100 tracking-tight text-center">
+                {data.profile.targetExam}
+              </p>
+            )}
           </div>
 
           {!data.installBannerDismissed && (
