@@ -233,6 +233,7 @@ function defaultData() {
     ],
     exercise: {
       customTypes: [],
+      deletedTypes: [],
       logs: [
         { id: uid(), date: todayISO(), exercise: "Skipping", quantity: 100 },
         { id: uid(), date: dayOffsetISO(-1), exercise: "Push-ups", quantity: 60 },
@@ -311,6 +312,28 @@ function Card({ children, className = "", style }) {
     >
       {children}
     </div>
+  );
+}
+
+function CollapsibleCard({ icon: Icon, title, iconClassName, className = "", children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Card className={className}>
+      <TapButton
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between"
+      >
+        <div className="flex items-center gap-2">
+          <Icon size={16} className={iconClassName} />
+          <p className="text-sm font-medium text-zinc-300">{title}</p>
+        </div>
+        <ChevronRight
+          size={16}
+          className={`text-zinc-500 transition-transform ${open ? "rotate-90" : ""}`}
+        />
+      </TapButton>
+      {open && <div className="mt-4">{children}</div>}
+    </Card>
   );
 }
 
@@ -688,7 +711,7 @@ function QuizDashboard({ quiz, setQuiz, accent }) {
           )}
         </div>
 
-        {!session.feedback ? (
+        {!session.feedback && (
           <div className="grid grid-cols-3 gap-3 mt-8">
             {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => (
               <TapButton
@@ -718,14 +741,6 @@ function QuizDashboard({ quiz, setQuiz, accent }) {
               <X size={20} />
             </TapButton>
           </div>
-        ) : (
-          <TapButton
-            onClick={nextQuestion}
-            className="w-full h-14 rounded-2xl font-medium text-zinc-500 mt-8 flex items-center justify-center gap-2 border border-zinc-800 bg-zinc-900/60"
-          >
-            {session.index + 1 >= session.questions.length ? "Loading results…" : "Next question in a moment"}
-            <ChevronRight size={16} />
-          </TapButton>
         )}
       </div>
     );
@@ -1299,7 +1314,10 @@ function ExamDashboard({ exams, setExams, accent }) {
 function ExerciseDashboard({ exercise, setExercise, accent }) {
   const allTypes = useMemo(() => {
     const fromLogs = Array.from(new Set(exercise.logs.map((l) => l.exercise)));
-    return Array.from(new Set([...BASE_EXERCISES, ...exercise.customTypes, ...fromLogs]));
+    const deleted = new Set(exercise.deletedTypes || []);
+    return Array.from(new Set([...BASE_EXERCISES, ...exercise.customTypes, ...fromLogs])).filter(
+      (t) => !deleted.has(t)
+    );
   }, [exercise]);
 
   const [date, setDate] = useState(todayISO());
@@ -1314,7 +1332,6 @@ function ExerciseDashboard({ exercise, setExercise, accent }) {
   });
   const [calSelected, setCalSelected] = useState(todayISO());
 
-  const [analyticsType, setAnalyticsType] = useState(allTypes[0] || "Skipping");
   const [timeframe, setTimeframe] = useState("month");
 
   const logWorkout = () => {
@@ -1370,22 +1387,35 @@ function ExerciseDashboard({ exercise, setExercise, accent }) {
     [calSelected, exercise.logs]
   );
 
-  const analyticsTotal = useMemo(() => {
+  const analyticsTotals = useMemo(() => {
     const now = new Date();
     const thisMonth = monthKeyOf(todayISO());
     const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const lastMonth = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, "0")}`;
 
-    return exercise.logs
-      .filter((l) => l.exercise === analyticsType)
-      .filter((l) => {
-        if (timeframe === "all") return true;
-        if (timeframe === "month") return monthKeyOf(l.date) === thisMonth;
-        if (timeframe === "lastMonth") return monthKeyOf(l.date) === lastMonth;
-        return true;
-      })
-      .reduce((sum, l) => sum + l.quantity, 0);
-  }, [exercise.logs, analyticsType, timeframe]);
+    const inRange = (l) => {
+      if (timeframe === "all") return true;
+      if (timeframe === "month") return monthKeyOf(l.date) === thisMonth;
+      if (timeframe === "lastMonth") return monthKeyOf(l.date) === lastMonth;
+      return true;
+    };
+
+    const totals = {};
+    allTypes.forEach((t) => (totals[t] = 0));
+    exercise.logs.filter(inRange).forEach((l) => {
+      if (totals[l.exercise] !== undefined) totals[l.exercise] += l.quantity;
+    });
+    return totals;
+  }, [exercise.logs, timeframe, allTypes]);
+
+  const deleteType = (name) => {
+    setExercise((ex) => ({
+      ...ex,
+      customTypes: ex.customTypes.filter((t) => t !== name),
+      deletedTypes: [...(ex.deletedTypes || []), name],
+    }));
+    if (selType === name) setSelType((allTypes.find((t) => t !== name)) || "");
+  };
 
   const accentHex = ACCENT_HEX[accent];
 
@@ -1607,23 +1637,6 @@ function ExerciseDashboard({ exercise, setExercise, accent }) {
           <p className="text-sm font-medium text-zinc-300">Monthly totals</p>
         </div>
 
-        <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-2">Exercise</p>
-        <div className="flex gap-2 mb-4 overflow-x-auto pb-1 -mx-1 px-1">
-          {allTypes.map((t) => (
-            <TapButton
-              key={t}
-              onClick={() => setAnalyticsType(t)}
-              className={`shrink-0 h-10 px-4 rounded-xl text-sm font-medium border ${
-                analyticsType === t
-                  ? `${ACCENTS[accent].bgSoft2} ${ACCENTS[accent].borderBright} ${ACCENTS[accent].textBright}`
-                  : "border-zinc-800 text-zinc-400"
-              }`}
-            >
-              {t}
-            </TapButton>
-          ))}
-        </div>
-
         <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-2">Timeframe</p>
         <div className="flex gap-2 mb-5">
           {[
@@ -1645,14 +1658,31 @@ function ExerciseDashboard({ exercise, setExercise, accent }) {
           ))}
         </div>
 
-        <div
-          className={`rounded-2xl border ${ACCENTS[accent].border} ${ACCENTS[accent].bgSoft} px-4 py-4 text-center`}
-        >
-          <p className="text-[11px] text-zinc-500 mb-1">
-            Total {analyticsType} ·{" "}
-            {timeframe === "month" ? "this month" : timeframe === "lastMonth" ? "last month" : "all time"}
-          </p>
-          <p className={`text-3xl font-bold ${ACCENTS[accent].textBright}`}>{analyticsTotal}</p>
+        <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-2">
+          Totals ·{" "}
+          {timeframe === "month" ? "this month" : timeframe === "lastMonth" ? "last month" : "all time"}
+        </p>
+        <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+          {allTypes.length === 0 && (
+            <p className="text-xs text-zinc-600 py-2">No exercises left — add one above.</p>
+          )}
+          {allTypes.map((t) => (
+            <div
+              key={t}
+              className={`shrink-0 relative rounded-2xl border ${ACCENTS[accent].border} ${ACCENTS[accent].bgSoft} px-4 py-3 text-center min-w-[92px]`}
+            >
+              <TapButton
+                onClick={() => deleteType(t)}
+                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-400"
+              >
+                <X size={10} />
+              </TapButton>
+              <p className="text-[10px] text-zinc-500 mb-1 whitespace-nowrap">{t}</p>
+              <p className={`text-xl font-bold ${ACCENTS[accent].textBright}`}>
+                {analyticsTotals[t]}
+              </p>
+            </div>
+          ))}
         </div>
       </Card>
     </div>
@@ -1664,11 +1694,7 @@ function SettingsDashboard({ profile, setProfile, accent, onReset }) {
 
   return (
     <div className="pb-6">
-      <Card className="mb-4">
-        <div className="flex items-center gap-2 mb-4">
-          <User size={16} className={ACCENTS[accent].text} />
-          <p className="text-sm font-medium text-zinc-300">Profile</p>
-        </div>
+      <CollapsibleCard icon={User} iconClassName={ACCENTS[accent].text} title="Profile" className="mb-4">
         <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-2">Name</p>
         <input
           value={profile.name}
@@ -1681,13 +1707,14 @@ function SettingsDashboard({ profile, setProfile, accent, onReset }) {
           onChange={(e) => setProfile((p) => ({ ...p, targetExam: e.target.value }))}
           className="w-full h-12 rounded-xl bg-zinc-950 border border-zinc-800 px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600"
         />
-      </Card>
+      </CollapsibleCard>
 
-      <Card className="mb-4">
-        <div className="flex items-center gap-2 mb-4">
-          <Palette size={16} className={ACCENTS[accent].text} />
-          <p className="text-sm font-medium text-zinc-300">Accent color</p>
-        </div>
+      <CollapsibleCard
+        icon={Palette}
+        iconClassName={ACCENTS[accent].text}
+        title="Accent color"
+        className="mb-4"
+      >
         <div className="flex gap-3">
           {Object.entries(ACCENTS).map(([key, val]) => (
             <TapButton
@@ -1711,13 +1738,9 @@ function SettingsDashboard({ profile, setProfile, accent, onReset }) {
             </TapButton>
           ))}
         </div>
-      </Card>
+      </CollapsibleCard>
 
-      <Card>
-        <div className="flex items-center gap-2 mb-3">
-          <AlertTriangle size={16} className="text-rose-400" />
-          <p className="text-sm font-medium text-zinc-300">Danger zone</p>
-        </div>
+      <CollapsibleCard icon={AlertTriangle} iconClassName="text-rose-400" title="Danger zone">
         <p className="text-xs text-zinc-500 mb-4">
           This clears every saved quiz, study log, and exam from this device. It can't be undone.
         </p>
@@ -1744,7 +1767,7 @@ function SettingsDashboard({ profile, setProfile, accent, onReset }) {
             </TapButton>
           </div>
         )}
-      </Card>
+      </CollapsibleCard>
     </div>
   );
 }
