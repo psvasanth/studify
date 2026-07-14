@@ -818,6 +818,7 @@ function StudyDashboard({ study, setStudy, accent }) {
   const [editing, setEditing] = useState(null); // {subject, id}
   const [editValue, setEditValue] = useState("");
   const [managingSubject, setManagingSubject] = useState(null);
+  const [confirmClear, setConfirmClear] = useState(false);
 
   const [chartDate, setChartDate] = useState(todayISO());
   const [allTime, setAllTime] = useState(false);
@@ -1109,6 +1110,50 @@ function StudyDashboard({ study, setStudy, accent }) {
                 <Plus size={18} />
               </TapButton>
             </div>
+          </div>
+        )}
+      </Card>
+
+      {/* Clear study data */}
+      <Card>
+        <div className="flex items-center gap-2 mb-3">
+          <AlertTriangle size={16} className="text-rose-400" />
+          <p className="text-sm font-medium text-zinc-300">Clear study data</p>
+        </div>
+        <p className="text-xs text-zinc-500 mb-4">
+          Resets every subject's logged hours to zero and clears session history. Sub-topic names stay — just
+          the time and logs are wiped. This can't be undone.
+        </p>
+        {!confirmClear ? (
+          <TapButton
+            onClick={() => setConfirmClear(true)}
+            className="w-full h-12 rounded-xl font-semibold text-rose-400 border border-rose-500/30 bg-rose-500/5"
+          >
+            Clear all study data
+          </TapButton>
+        ) : (
+          <div className="flex gap-3">
+            <TapButton
+              onClick={() => setConfirmClear(false)}
+              className="flex-1 h-12 rounded-xl font-semibold text-zinc-300 border border-zinc-800 bg-zinc-900"
+            >
+              Cancel
+            </TapButton>
+            <TapButton
+              onClick={() => {
+                setStudy((s) => {
+                  const subjects = {};
+                  SUBJECT_LIST.forEach((subj) => {
+                    subjects[subj] = { sub: s.subjects[subj].sub.map((x) => ({ ...x, hours: 0 })) };
+                  });
+                  return { ...s, subjects, log: [] };
+                });
+                setConfirmClear(false);
+              }}
+              className="flex-1 h-12 rounded-xl font-semibold text-zinc-950 bg-rose-500"
+            >
+              Confirm clear
+            </TapButton>
           </div>
         )}
       </Card>
