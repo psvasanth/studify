@@ -16,7 +16,6 @@ import {
   Flame,
   Sparkles,
   ArrowLeft,
-  Delete,
   User,
   Palette,
   AlertTriangle,
@@ -344,6 +343,7 @@ function CollapsibleCard({ icon: Icon, title, iconClassName, className = "", chi
 function QuizDashboard({ quiz, setQuiz, accent }) {
   const [stage, setStage] = useState("setup"); // setup | active | results
   const [session, setSession] = useState(null);
+  const [qTimer, setQTimer] = useState(0);
   const accentHex = ACCENT_HEX[accent];
 
   const config = quiz.config;
@@ -398,99 +398,83 @@ function QuizDashboard({ quiz, setQuiz, accent }) {
       questions,
       index: 0,
       input: "",
-      feedback: null,
       correctCount: 0,
+      streak: 0,
+      bestStreak: 0,
       sessionMistakes: [],
     });
     setStage("active");
   };
 
-  const pressDigit = (d) => {
-    setSession((s) => {
-      if (s.feedback) return s;
-      if (s.input.length >= 5) return s;
-      return { ...s, input: s.input + d };
-    });
-  };
-  const pressBackspace = () => {
-    setSession((s) => (s.feedback ? s : { ...s, input: s.input.slice(0, -1) }));
-  };
-  const pressClear = () => {
-    setSession((s) => (s.feedback ? s : { ...s, input: "" }));
-  };
+  // Per-question elapsed-time display — purely cosmetic, resets each question.
+  useEffect(() => {
+    if (stage !== "active") return;
+    setQTimer(0);
+    const iv = setInterval(() => setQTimer((t) => t + 1), 1000);
+    return () => clearInterval(iv);
+  }, [stage, session?.index]);
 
-  const submitAnswer = useCallback(() => {
-    setSession((s) => {
-      if (!s || s.feedback) return s;
-      const q = s.questions[s.index];
-      const userVal = s.input === "" ? null : parseInt(s.input, 10);
-      const correct = userVal !== null && userVal === q.answer;
-      let mistakes = s.sessionMistakes;
-      if (!correct) {
-        mistakes = [...mistakes, { a: q.a, b: q.b, answer: q.answer, given: userVal }];
-        setQuiz((qz) => {
-          const key = `${q.a} x ${q.b}`;
-          const prev = qz.mistakes[key];
-          return {
-            ...qz,
-            mistakes: {
-              ...qz.mistakes,
-              [key]: { wrong: (prev?.wrong || 0) + 1, correct: q.answer },
-            },
-          };
-        });
-      }
-      return {
-        ...s,
-        feedback: { correct, given: userVal },
-        correctCount: correct ? s.correctCount + 1 : s.correctCount,
-        sessionMistakes: mistakes,
-      };
-    });
-  }, [setQuiz]);
-
-  const nextQuestion = useCallback(() => {
-    setSession((s) => {
-      if (!s.feedback) return s;
-      const nextIndex = s.index + 1;
-      if (nextIndex >= s.questions.length) {
-        setQuiz((qz) => ({
+  const bumpMistakeCounter = useCallback(
+    (q) => {
+      setQuiz((qz) => {
+        const key = `${q.a} x ${q.b}`;
+        const prev = qz.mistakes[key];
+        return {
           ...qz,
-          lastResult: {
-            correct: s.correctCount,
-            total: s.questions.length,
-            date: new Date().toISOString(),
-          },
-        }));
-        setStage("results");
-        return s;
-      }
-      return { ...s, index: nextIndex, input: "", feedback: null };
-    });
-  }, [setQuiz]);
+          mistakes: { ...qz.mistakes, [key]: { wrong: (prev?.wrong || 0) + 1, correct: q.answer } },
+        };
+      });
+    },
+    [setQuiz]
+  );
 
-  // Auto-submit — no manual tick needed. Submits instantly once the digit
-  // count matches the answer's length, or after 5s of inactivity either way.
-  useEffect(() => {
-    if (stage !== "active" || !session || session.feedback) return;
-    const q = session.questions[session.index];
-    const expectedLen = String(q.answer).length;
-    if (session.input.length > 0 && session.input.length >= expectedLen) {
-      submitAnswer();
-      return;
-    }
-    const t = setTimeout(() => submitAnswer(), 5000);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage, session?.input, session?.index, session?.feedback]);
+  // Submit — no artificial delay. Checks the answer (or records a skip) and
+  // moves straight to the next question or results, exactly like a plain
+  // native form submit would.
+  const submit = useCallback(
+    (isSkip) => {
+      setSession((s) => {
+        if (!s) return s;
+        const q = s.questions[s.index];
+        const raw = s.input.trim();
+        const blank = raw === "" || isSkip;
+        let correctCount = s.correctCount;
+        let streak = s.streak;
+        let bestStreak = s.bestStreak;
+        let mistakes = s.sessionMistakes;
 
-  // Auto-advance shortly after feedback appears — no manual tap required.
-  useEffect(() => {
-    if (stage !== "active" || !session?.feedback) return;
-    const t = setTimeout(() => nextQuestion(), 850);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage, session?.feedback]);
+        if (blank) {
+          streak = 0;
+          mistakes = [...mistakes, { a: q.a, b: q.b, answer: q.answer, given: null }];
+          bumpMistakeCounter(q);
+        } else {
+          const userVal = parseInt(raw, 10);
+          const correct = userVal === q.answer;
+          if (correct) {
+            correctCount += 1;
+            streak += 1;
+            bestStreak = Math.max(bestStreak, streak);
+          } else {
+            streak = 0;
+            mistakes = [...mistakes, { a: q.a, b: q.b, answer: q.answer, given: userVal }];
+            bumpMistakeCounter(q);
+          }
+        }
+
+        const nextIndex = s.index + 1;
+        if (nextIndex >= s.questions.length) {
+          setQuiz((qz) => ({
+            ...qz,
+            lastResult: { correct: correctCount, total: s.questions.length, date: new Date().toISOString() },
+          }));
+          setStage("results");
+          return { ...s, correctCount, streak, bestStreak, sessionMistakes: mistakes };
+        }
+        return { ...s, index: nextIndex, input: "", correctCount, streak, bestStreak, sessionMistakes: mistakes };
+      });
+    },
+    [bumpMistakeCounter, setQuiz]
+  );
 
   const topMistakes = useMemo(() => {
     return Object.entries(quiz.mistakes)
@@ -666,82 +650,70 @@ function QuizDashboard({ quiz, setQuiz, accent }) {
             <ArrowLeft size={16} className="text-zinc-400" />
           </TapButton>
           <p className="text-xs font-medium text-zinc-500">
-            Question {session.index + 1} of {session.questions.length}
+            Question {session.index + 1} of {session.questions.length} · {qTimer}s
           </p>
           <div className="w-9 h-9" />
         </div>
 
-        <div className="w-full h-1.5 rounded-full bg-zinc-900 mb-8 overflow-hidden">
+        <div className="w-full h-1.5 rounded-full bg-zinc-900 mb-6 overflow-hidden">
           <div
             className="h-full rounded-full transition-all duration-300"
             style={{
-              width: `${((session.index + (session.feedback ? 1 : 0)) / session.questions.length) * 100}%`,
+              width: `${(session.index / session.questions.length) * 100}%`,
               backgroundColor: accentHex,
             }}
           />
         </div>
 
-        <div className="flex-1 flex flex-col items-center justify-center gap-6">
+        <div className="grid grid-cols-3 gap-2 mb-8">
+          <div className="rounded-xl bg-zinc-900 border border-zinc-800 py-2 text-center">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wide">Correct</p>
+            <p className="text-lg font-bold text-zinc-100">{session.correctCount}</p>
+          </div>
+          <div className="rounded-xl bg-zinc-900 border border-zinc-800 py-2 text-center">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wide">Streak</p>
+            <p className={`text-lg font-bold ${session.streak > 0 ? ACCENTS[accent].textBright : "text-zinc-100"}`}>
+              {session.streak > 0 ? session.streak : "—"}
+            </p>
+          </div>
+          <div className="rounded-xl bg-zinc-900 border border-zinc-800 py-2 text-center">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wide">Left</p>
+            <p className="text-lg font-bold text-zinc-100">{session.questions.length - session.index}</p>
+          </div>
+        </div>
+
+        <div className="flex-1 flex flex-col items-center justify-center gap-5">
           <p className="text-4xl font-bold text-zinc-50 tracking-tight">
             {q.a} <span className={ACCENTS[accent].text}>×</span> {q.b}
           </p>
 
-          <div
-            className={`w-full max-w-[260px] h-16 rounded-2xl border-2 flex items-center justify-center text-2xl font-bold transition-colors ${
-              session.feedback
-                ? session.feedback.correct
-                  ? "border-emerald-500 text-emerald-400 bg-emerald-500/10"
-                  : "border-rose-500 text-rose-400 bg-rose-500/10"
-                : "border-zinc-700 text-zinc-100 bg-zinc-900"
-            }`}
-          >
-            {session.input || <span className="text-zinc-600">?</span>}
+          <div className="flex w-full max-w-[300px]">
+            <input
+              key={session.index}
+              type="number"
+              inputMode="numeric"
+              autoFocus
+              value={session.input}
+              onChange={(e) => setSession((s) => ({ ...s, input: e.target.value }))}
+              onKeyDown={(e) => e.key === "Enter" && submit(false)}
+              placeholder="?"
+              className="flex-1 h-14 rounded-l-2xl border-2 border-r-0 border-zinc-700 bg-zinc-900 text-center text-2xl font-bold text-zinc-100 outline-none focus:border-zinc-500"
+            />
+            <TapButton
+              onClick={() => submit(false)}
+              className={`px-5 rounded-r-2xl font-semibold text-zinc-950 ${ACCENTS[accent].bg}`}
+            >
+              Enter
+            </TapButton>
           </div>
 
-          {session.feedback ? (
-            <p
-              className={`text-sm font-medium ${
-                session.feedback.correct ? "text-emerald-400" : "text-rose-400"
-              }`}
-            >
-              {session.feedback.correct ? "Correct!" : `Answer: ${q.answer}`}
-            </p>
-          ) : (
-            <p className="text-[11px] text-zinc-600">Submits automatically as you type</p>
-          )}
+          <p className="text-[11px] text-zinc-600">
+            Press Enter to submit ·{" "}
+            <TapButton onClick={() => submit(true)} className="underline underline-offset-2 text-zinc-500">
+              skip
+            </TapButton>
+          </p>
         </div>
-
-        {!session.feedback && (
-          <div className="grid grid-cols-3 gap-3 mt-8">
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => (
-              <TapButton
-                key={d}
-                onClick={() => pressDigit(String(d))}
-                className="h-14 rounded-2xl bg-zinc-900 border border-zinc-800 text-xl font-semibold text-zinc-100"
-              >
-                {d}
-              </TapButton>
-            ))}
-            <TapButton
-              onClick={pressBackspace}
-              className="h-14 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400"
-            >
-              <Delete size={20} />
-            </TapButton>
-            <TapButton
-              onClick={() => pressDigit("0")}
-              className="h-14 rounded-2xl bg-zinc-900 border border-zinc-800 text-xl font-semibold text-zinc-100"
-            >
-              0
-            </TapButton>
-            <TapButton
-              onClick={pressClear}
-              className="h-14 rounded-2xl flex items-center justify-center text-zinc-400 border border-zinc-800 bg-zinc-900"
-            >
-              <X size={20} />
-            </TapButton>
-          </div>
-        )}
       </div>
     );
   }
@@ -762,7 +734,10 @@ function QuizDashboard({ quiz, setQuiz, accent }) {
             {session.correctCount}
             <span className="text-zinc-500 text-xl"> / {session.questions.length}</span>
           </p>
-          <p className="text-sm text-zinc-500 mt-1">{accuracy}% accuracy this round</p>
+          <p className="text-sm text-zinc-500 mt-1">
+            {accuracy}% accuracy
+            {session.bestStreak > 1 ? ` · best streak ${session.bestStreak}` : ""}
+          </p>
         </div>
 
         {session.sessionMistakes.length > 0 && (
