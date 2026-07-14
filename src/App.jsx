@@ -993,7 +993,10 @@ function StudyDashboard({ study, setStudy, accent }) {
             <p className="text-sm font-medium text-zinc-300">Hours by subject</p>
           </div>
           <TapButton
-            onClick={() => setAllTime((v) => !v)}
+            onClick={() => {
+              setAllTime((v) => !v);
+              setConfirmClear(false);
+            }}
             className={`h-8 px-3 rounded-lg text-[11px] font-semibold border ${
               allTime
                 ? `${ACCENTS[accent].bgSoft2} ${ACCENTS[accent].borderBright} ${ACCENTS[accent].textBright}`
@@ -1014,9 +1017,49 @@ function StudyDashboard({ study, setStudy, accent }) {
           />
         )}
 
-        <p className="text-[11px] text-zinc-500 mb-0.5">
-          Total {allTime ? "(all time)" : `· ${prettyDay(chartDate)}`}
-        </p>
+        <div className="flex items-center justify-between mb-0.5">
+          <p className="text-[11px] text-zinc-500">
+            Total {allTime ? "(all time)" : `· ${prettyDay(chartDate)}`}
+          </p>
+          {allTime && !confirmClear && (
+            <TapButton
+              onClick={() => setConfirmClear(true)}
+              className="w-6 h-6 rounded-md flex items-center justify-center text-zinc-600"
+            >
+              <Trash2 size={12} />
+            </TapButton>
+          )}
+        </div>
+
+        {allTime && confirmClear && (
+          <div className="flex items-center justify-between mb-2 rounded-lg bg-rose-500/5 border border-rose-500/20 px-2.5 py-1.5">
+            <span className="text-[11px] text-rose-400">Clear all-time hours?</span>
+            <div className="flex gap-2">
+              <TapButton
+                onClick={() => setConfirmClear(false)}
+                className="text-[11px] text-zinc-400 px-2 py-0.5"
+              >
+                Cancel
+              </TapButton>
+              <TapButton
+                onClick={() => {
+                  setStudy((s) => {
+                    const subjects = {};
+                    SUBJECT_LIST.forEach((subj) => {
+                      subjects[subj] = { sub: s.subjects[subj].sub.map((x) => ({ ...x, hours: 0 })) };
+                    });
+                    return { ...s, subjects, log: [] };
+                  });
+                  setConfirmClear(false);
+                }}
+                className="text-[11px] font-semibold text-rose-400 px-2 py-0.5"
+              >
+                Clear
+              </TapButton>
+            </div>
+          </div>
+        )}
+
         <p className="text-3xl font-bold text-zinc-50 mb-4">{totalAllSubjects.toFixed(1)}h</p>
 
         <div className="space-y-2">
@@ -1110,50 +1153,6 @@ function StudyDashboard({ study, setStudy, accent }) {
                 <Plus size={18} />
               </TapButton>
             </div>
-          </div>
-        )}
-      </Card>
-
-      {/* Clear study data */}
-      <Card>
-        <div className="flex items-center gap-2 mb-3">
-          <AlertTriangle size={16} className="text-rose-400" />
-          <p className="text-sm font-medium text-zinc-300">Clear study data</p>
-        </div>
-        <p className="text-xs text-zinc-500 mb-4">
-          Resets every subject's logged hours to zero and clears session history. Sub-topic names stay — just
-          the time and logs are wiped. This can't be undone.
-        </p>
-        {!confirmClear ? (
-          <TapButton
-            onClick={() => setConfirmClear(true)}
-            className="w-full h-12 rounded-xl font-semibold text-rose-400 border border-rose-500/30 bg-rose-500/5"
-          >
-            Clear all study data
-          </TapButton>
-        ) : (
-          <div className="flex gap-3">
-            <TapButton
-              onClick={() => setConfirmClear(false)}
-              className="flex-1 h-12 rounded-xl font-semibold text-zinc-300 border border-zinc-800 bg-zinc-900"
-            >
-              Cancel
-            </TapButton>
-            <TapButton
-              onClick={() => {
-                setStudy((s) => {
-                  const subjects = {};
-                  SUBJECT_LIST.forEach((subj) => {
-                    subjects[subj] = { sub: s.subjects[subj].sub.map((x) => ({ ...x, hours: 0 })) };
-                  });
-                  return { ...s, subjects, log: [] };
-                });
-                setConfirmClear(false);
-              }}
-              className="flex-1 h-12 rounded-xl font-semibold text-zinc-950 bg-rose-500"
-            >
-              Confirm clear
-            </TapButton>
           </div>
         )}
       </Card>
