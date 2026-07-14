@@ -27,7 +27,6 @@ import {
   Trophy,
   BarChart3,
   Dumbbell,
-  ChevronDown,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -345,11 +344,27 @@ function QuizDashboard({ quiz, setQuiz, accent }) {
   };
 
   const buildQuestions = useCallback(() => {
+    const combos = [];
+    config.tables.forEach((a) => {
+      for (let b = 1; b <= config.multiplierDepth; b++) {
+        combos.push({ a, b, answer: a * b });
+      }
+    });
+    const shuffle = (arr) => {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+    };
+    shuffle(combos);
     const list = [];
-    for (let i = 0; i < config.questionsPerRound; i++) {
-      const a = config.tables[Math.floor(Math.random() * config.tables.length)];
-      const b = 1 + Math.floor(Math.random() * config.multiplierDepth);
-      list.push({ a, b, answer: a * b });
+    let lap = 0;
+    while (list.length < config.questionsPerRound && combos.length > 0) {
+      if (lap > 0) shuffle(combos);
+      for (let i = 0; i < combos.length && list.length < config.questionsPerRound; i++) {
+        list.push(combos[i]);
+      }
+      lap++;
     }
     return list;
   }, [config]);
@@ -377,13 +392,16 @@ function QuizDashboard({ quiz, setQuiz, accent }) {
   const pressBackspace = () => {
     setSession((s) => (s.feedback ? s : { ...s, input: s.input.slice(0, -1) }));
   };
+  const pressClear = () => {
+    setSession((s) => (s.feedback ? s : { ...s, input: "" }));
+  };
 
-  const submitAnswer = () => {
+  const submitAnswer = useCallback(() => {
     setSession((s) => {
-      if (s.feedback || s.input === "") return s;
+      if (!s || s.feedback) return s;
       const q = s.questions[s.index];
-      const userVal = parseInt(s.input, 10);
-      const correct = userVal === q.answer;
+      const userVal = s.input === "" ? null : parseInt(s.input, 10);
+      const correct = userVal !== null && userVal === q.answer;
       let mistakes = s.sessionMistakes;
       if (!correct) {
         mistakes = [...mistakes, { a: q.a, b: q.b, answer: q.answer, given: userVal }];
@@ -406,7 +424,7 @@ function QuizDashboard({ quiz, setQuiz, accent }) {
         sessionMistakes: mistakes,
       };
     });
-  };
+  }, [setQuiz]);
 
   const nextQuestion = useCallback(() => {
     setSession((s) => {
@@ -428,6 +446,21 @@ function QuizDashboard({ quiz, setQuiz, accent }) {
     });
   }, [setQuiz]);
 
+  // Auto-submit — no manual tick needed. Submits instantly once the digit
+  // count matches the answer's length, or after 5s of inactivity either way.
+  useEffect(() => {
+    if (stage !== "active" || !session || session.feedback) return;
+    const q = session.questions[session.index];
+    const expectedLen = String(q.answer).length;
+    if (session.input.length > 0 && session.input.length >= expectedLen) {
+      submitAnswer();
+      return;
+    }
+    const t = setTimeout(() => submitAnswer(), 5000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage, session?.input, session?.index, session?.feedback]);
+
   // Auto-advance shortly after feedback appears — no manual tap required.
   useEffect(() => {
     if (stage !== "active" || !session?.feedback) return;
@@ -447,13 +480,6 @@ function QuizDashboard({ quiz, setQuiz, accent }) {
   if (stage === "setup") {
     return (
       <div className="pb-6">
-        <SectionHeader
-          icon={Calculator}
-          title="Tables Quiz"
-          subtitle="Configure your practice round"
-          accent={ACCENTS[accent]}
-        />
-
         <Card className="mb-4">
           <p className="text-sm font-medium text-zinc-300 mb-3">Multiplier depth</p>
           <div className="flex gap-2 mb-3">
@@ -649,7 +675,7 @@ function QuizDashboard({ quiz, setQuiz, accent }) {
             {session.input || <span className="text-zinc-600">?</span>}
           </div>
 
-          {session.feedback && (
+          {session.feedback ? (
             <p
               className={`text-sm font-medium ${
                 session.feedback.correct ? "text-emerald-400" : "text-rose-400"
@@ -657,6 +683,8 @@ function QuizDashboard({ quiz, setQuiz, accent }) {
             >
               {session.feedback.correct ? "Correct!" : `Answer: ${q.answer}`}
             </p>
+          ) : (
+            <p className="text-[11px] text-zinc-600">Submits automatically as you type</p>
           )}
         </div>
 
@@ -684,11 +712,10 @@ function QuizDashboard({ quiz, setQuiz, accent }) {
               0
             </TapButton>
             <TapButton
-              onClick={submitAnswer}
-              disabled={session.input === ""}
-              className={`h-14 rounded-2xl flex items-center justify-center text-zinc-950 font-semibold ${ACCENTS[accent].bg}`}
+              onClick={pressClear}
+              className="h-14 rounded-2xl flex items-center justify-center text-zinc-400 border border-zinc-800 bg-zinc-900"
             >
-              <Check size={22} />
+              <X size={20} />
             </TapButton>
           </div>
         ) : (
@@ -801,15 +828,30 @@ function StudyDashboard({ study, setStudy, accent }) {
   const [editValue, setEditValue] = useState("");
   const [managingSubject, setManagingSubject] = useState(null);
 
+  const [chartDate, setChartDate] = useState(todayISO());
+  const [allTime, setAllTime] = useState(false);
+
   const totals = useMemo(() => {
     const t = {};
-    SUBJECT_LIST.forEach((s) => {
-      t[s] = study.subjects[s].sub.reduce((sum, x) => sum + x.hours, 0);
-    });
+    if (allTime) {
+      SUBJECT_LIST.forEach((s) => {
+        t[s] = study.subjects[s].sub.reduce((sum, x) => sum + x.hours, 0);
+      });
+    } else {
+      SUBJECT_LIST.forEach((s) => (t[s] = 0));
+      study.log.forEach((l) => {
+        if (l.date.slice(0, 10) === chartDate && t[l.subject] !== undefined) {
+          t[l.subject] += l.hours;
+        }
+      });
+    }
     return t;
-  }, [study]);
+  }, [study, allTime, chartDate]);
 
-  const maxTotal = Math.max(1, ...Object.values(totals));
+  const totalAllSubjects = useMemo(
+    () => Object.values(totals).reduce((a, b) => a + b, 0),
+    [totals]
+  );
 
   const currentSubOptions = study.subjects[selSubject].sub;
 
@@ -829,7 +871,7 @@ function StudyDashboard({ study, setStudy, accent }) {
       );
       const subName = subjectObj.sub.find((x) => x.id === selSub)?.name;
       const log = [
-        { id: uid(), subject: selSubject, sub: subName, hours: hoursInput, date: new Date().toISOString() },
+        { id: uid(), subject: selSubject, sub: subName, hours: hoursInput, date: todayISO() },
         ...s.log,
       ].slice(0, 20);
       return { ...s, subjects: { ...s.subjects, [selSubject]: { sub } }, log };
@@ -878,37 +920,85 @@ function StudyDashboard({ study, setStudy, accent }) {
 
   return (
     <div className="pb-6">
-      <SectionHeader
-        icon={BookOpen}
-        title="Study Tracker"
-        subtitle="Log hours across your subjects"
-        accent={ACCENTS[accent]}
-      />
-
       {/* Progress overview */}
       <Card className="mb-4">
-        <div className="flex items-center gap-2 mb-4">
-          <BarChart3 size={16} className={ACCENTS[accent].text} />
-          <p className="text-sm font-medium text-zinc-300">Hours by subject</p>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <BarChart3 size={16} className={ACCENTS[accent].text} />
+            <p className="text-sm font-medium text-zinc-300">Hours by subject</p>
+          </div>
+          <TapButton
+            onClick={() => setAllTime((v) => !v)}
+            className={`h-8 px-3 rounded-lg text-[11px] font-semibold border ${
+              allTime
+                ? `${ACCENTS[accent].bgSoft2} ${ACCENTS[accent].borderBright} ${ACCENTS[accent].textBright}`
+                : "border-zinc-800 text-zinc-500"
+            }`}
+          >
+            All time
+          </TapButton>
         </div>
-        <div className="space-y-3">
-          {SUBJECT_LIST.map((s) => (
-            <div key={s}>
-              <div className="flex justify-between text-xs mb-1">
-                <span className="text-zinc-300 font-medium">{s}</span>
-                <span className="text-zinc-500">{totals[s].toFixed(1)}h</span>
-              </div>
-              <div className="w-full h-2.5 rounded-full bg-zinc-800/80 overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all duration-500"
-                  style={{
-                    width: `${(totals[s] / maxTotal) * 100}%`,
-                    backgroundColor: SUBJECT_COLORS[s].hex,
-                  }}
-                />
-              </div>
+
+        {!allTime && (
+          <input
+            type="date"
+            value={chartDate}
+            max={todayISO()}
+            onChange={(e) => setChartDate(e.target.value)}
+            className="w-full h-11 rounded-xl bg-zinc-950 border border-zinc-800 px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600 mb-5"
+          />
+        )}
+
+        <div className="flex items-center gap-6">
+          <svg width="140" height="140" viewBox="0 0 140 140" className="shrink-0 -rotate-90">
+            <circle cx="70" cy="70" r="58" fill="none" stroke="#27272a" strokeWidth="16" />
+            {(() => {
+              const r = 58;
+              const circumference = 2 * Math.PI * r;
+              let offset = 0;
+              return SUBJECT_LIST.filter((s) => totals[s] > 0).map((s) => {
+                const frac = totalAllSubjects > 0 ? totals[s] / totalAllSubjects : 0;
+                const dash = frac * circumference;
+                const el = (
+                  <circle
+                    key={s}
+                    cx="70"
+                    cy="70"
+                    r={r}
+                    fill="none"
+                    stroke={SUBJECT_COLORS[s].hex}
+                    strokeWidth="16"
+                    strokeDasharray={`${dash} ${circumference - dash}`}
+                    strokeDashoffset={-offset}
+                    strokeLinecap="butt"
+                  />
+                );
+                offset += dash;
+                return el;
+              });
+            })()}
+          </svg>
+
+          <div className="flex-1 min-w-0">
+            <p className="text-[11px] text-zinc-500 mb-0.5">
+              Total {allTime ? "(all time)" : `· ${prettyDay(chartDate)}`}
+            </p>
+            <p className="text-3xl font-bold text-zinc-50 mb-3">{totalAllSubjects.toFixed(1)}h</p>
+            <div className="space-y-1.5">
+              {SUBJECT_LIST.map((s) => (
+                <div key={s} className="flex items-center justify-between text-xs">
+                  <span className="flex items-center gap-1.5 text-zinc-400">
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0"
+                      style={{ backgroundColor: SUBJECT_COLORS[s].hex }}
+                    />
+                    {s}
+                  </span>
+                  <span className="text-zinc-300 font-medium">{totals[s].toFixed(1)}h</span>
+                </div>
+              ))}
             </div>
-          ))}
+          </div>
         </div>
       </Card>
 
@@ -1063,32 +1153,6 @@ function StudyDashboard({ study, setStudy, accent }) {
           </div>
         )}
       </Card>
-
-      {/* Recent sessions */}
-      {study.log.length > 0 && (
-        <Card>
-          <div className="flex items-center gap-2 mb-3">
-            <Clock size={16} className={ACCENTS[accent].text} />
-            <p className="text-sm font-medium text-zinc-300">Recent sessions</p>
-          </div>
-          <div className="space-y-2">
-            {study.log.slice(0, 5).map((l) => (
-              <div key={l.id} className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span
-                    className="w-2 h-2 rounded-full shrink-0"
-                    style={{ backgroundColor: SUBJECT_COLORS[l.subject]?.hex }}
-                  />
-                  <span className="text-zinc-300 truncate">
-                    {l.subject} · {l.sub}
-                  </span>
-                </div>
-                <span className="text-zinc-500 shrink-0 ml-2">{l.hours}h</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
     </div>
   );
 }
@@ -1125,56 +1189,10 @@ function ExamDashboard({ exams, setExams, accent }) {
 
   return (
     <div className="pb-6">
-      <SectionHeader
-        icon={CalendarClock}
-        title="Exam Countdown"
-        subtitle="Track dates that matter"
-        accent={ACCENTS[accent]}
-      />
-
-      <TapButton
-        onClick={() => setShowForm((v) => !v)}
-        className={`w-full h-14 rounded-2xl font-semibold mb-4 flex items-center justify-center gap-2 border ${
-          showForm
-            ? "border-zinc-700 text-zinc-300 bg-zinc-900"
-            : `text-zinc-950 ${ACCENTS[accent].bg} border-transparent`
-        }`}
-        style={!showForm ? glowStyle(ACCENT_HEX[accent], 0.35) : undefined}
-      >
-        {showForm ? <X size={18} /> : <CalendarPlus size={18} />}
-        {showForm ? "Cancel" : "Add exam or event"}
-      </TapButton>
-
-      {showForm && (
-        <Card className="mb-4">
-          <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-2">Name</p>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. NEET SS Mock #3"
-            className="w-full h-12 rounded-xl bg-zinc-950 border border-zinc-800 px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600 mb-4"
-          />
-          <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-2">Date</p>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="w-full h-12 rounded-xl bg-zinc-950 border border-zinc-800 px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600 mb-4"
-          />
-          <TapButton
-            onClick={addExam}
-            disabled={!name.trim() || !date}
-            className={`w-full h-12 rounded-xl font-semibold text-zinc-950 ${ACCENTS[accent].bg}`}
-          >
-            Save event
-          </TapButton>
-        </Card>
-      )}
-
-      <div className="space-y-3">
+      <div className="space-y-3 mb-4">
         {sorted.length === 0 && (
           <p className="text-sm text-zinc-600 text-center py-10">
-            No events yet. Add your first exam above.
+            No events yet. Add your first exam below.
           </p>
         )}
         {sorted.map((ex) => {
@@ -1227,6 +1245,45 @@ function ExamDashboard({ exams, setExams, accent }) {
           );
         })}
       </div>
+
+      {showForm && (
+        <Card className="mb-4">
+          <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-2">Name</p>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. NEET SS Mock #3"
+            className="w-full h-12 rounded-xl bg-zinc-950 border border-zinc-800 px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600 mb-4"
+          />
+          <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-2">Date</p>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="w-full h-12 rounded-xl bg-zinc-950 border border-zinc-800 px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600 mb-4"
+          />
+          <TapButton
+            onClick={addExam}
+            disabled={!name.trim() || !date}
+            className={`w-full h-12 rounded-xl font-semibold text-zinc-950 ${ACCENTS[accent].bg}`}
+          >
+            Save event
+          </TapButton>
+        </Card>
+      )}
+
+      <TapButton
+        onClick={() => setShowForm((v) => !v)}
+        className={`w-full h-14 rounded-2xl font-semibold flex items-center justify-center gap-2 border ${
+          showForm
+            ? "border-zinc-700 text-zinc-300 bg-zinc-900"
+            : `text-zinc-950 ${ACCENTS[accent].bg} border-transparent`
+        }`}
+        style={!showForm ? glowStyle(ACCENT_HEX[accent], 0.35) : undefined}
+      >
+        {showForm ? <X size={18} /> : <CalendarPlus size={18} />}
+        {showForm ? "Cancel" : "Add exam"}
+      </TapButton>
     </div>
   );
 }
@@ -1251,8 +1308,11 @@ function ExerciseDashboard({ exercise, setExercise, accent }) {
   const [customName, setCustomName] = useState("");
   const [quantity, setQuantity] = useState("");
 
-  const [browseDate, setBrowseDate] = useState("");
-  const [openDay, setOpenDay] = useState(null);
+  const [calCursor, setCalCursor] = useState(() => {
+    const d = new Date();
+    return { year: d.getFullYear(), month: d.getMonth() };
+  });
+  const [calSelected, setCalSelected] = useState(todayISO());
 
   const [analyticsType, setAnalyticsType] = useState(allTypes[0] || "Skipping");
   const [timeframe, setTimeframe] = useState("month");
@@ -1287,21 +1347,28 @@ function ExerciseDashboard({ exercise, setExercise, accent }) {
     [exercise.logs]
   );
 
-  const dayGroups = useMemo(() => {
-    const map = {};
-    exercise.logs.forEach((l) => {
-      if (!map[l.date]) map[l.date] = [];
-      map[l.date].push(l);
-    });
-    return Object.entries(map)
-      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
-      .slice(0, 30);
-  }, [exercise.logs]);
+  const loggedDates = useMemo(
+    () => new Set(exercise.logs.map((l) => l.date)),
+    [exercise.logs]
+  );
 
-  const browseResults = useMemo(() => {
-    if (!browseDate) return null;
-    return exercise.logs.filter((l) => l.date === browseDate);
-  }, [browseDate, exercise.logs]);
+  const calGrid = useMemo(() => {
+    const { year, month } = calCursor;
+    const firstDay = new Date(year, month, 1);
+    const startWeekday = firstDay.getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const cells = [];
+    for (let i = 0; i < startWeekday; i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) {
+      cells.push(`${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
+    }
+    return cells;
+  }, [calCursor]);
+
+  const calSelectedResults = useMemo(
+    () => exercise.logs.filter((l) => l.date === calSelected),
+    [calSelected, exercise.logs]
+  );
 
   const analyticsTotal = useMemo(() => {
     const now = new Date();
@@ -1324,13 +1391,6 @@ function ExerciseDashboard({ exercise, setExercise, accent }) {
 
   return (
     <div className="pb-6">
-      <SectionHeader
-        icon={Dumbbell}
-        title="Exercise Tracker"
-        subtitle="Log workouts and see your progress"
-        accent={ACCENTS[accent]}
-      />
-
       {/* Input form */}
       <Card className="mb-4">
         <p className="text-sm font-medium text-zinc-300 mb-3">Log a workout</p>
@@ -1441,84 +1501,102 @@ function ExerciseDashboard({ exercise, setExercise, accent }) {
         )}
       </Card>
 
-      {/* Jump to a specific date */}
+      {/* Calendar view */}
       <Card className="mb-4">
-        <p className="text-sm font-medium text-zinc-300 mb-3">Look up a date</p>
-        <input
-          type="date"
-          value={browseDate}
-          max={todayISO()}
-          onChange={(e) => setBrowseDate(e.target.value)}
-          className="w-full h-12 rounded-xl bg-zinc-950 border border-zinc-800 px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600 mb-3"
-        />
-        {browseDate && (
-          <div className="space-y-2">
-            {browseResults.length === 0 ? (
-              <p className="text-xs text-zinc-600">Nothing logged on {prettyDay(browseDate)}.</p>
-            ) : (
-              browseResults.map((l) => (
-                <div
-                  key={l.id}
-                  className="flex items-center justify-between rounded-xl bg-zinc-950/60 border border-zinc-800 px-3 py-2"
-                >
-                  <span className="text-sm text-zinc-200">
-                    {l.quantity} {l.exercise}
-                  </span>
-                  <span className="text-[11px] text-zinc-500">{prettyDay(browseDate)}</span>
-                </div>
-              ))
-            )}
-          </div>
-        )}
-      </Card>
+        <div className="flex items-center justify-between mb-4">
+          <TapButton
+            onClick={() =>
+              setCalCursor((c) => {
+                const m = c.month === 0 ? 11 : c.month - 1;
+                const y = c.month === 0 ? c.year - 1 : c.year;
+                return { year: y, month: m };
+              })
+            }
+            className="w-9 h-9 rounded-full flex items-center justify-center bg-zinc-900 border border-zinc-800"
+          >
+            <ArrowLeft size={15} className="text-zinc-400" />
+          </TapButton>
+          <p className="text-sm font-semibold text-zinc-200">
+            {new Date(calCursor.year, calCursor.month, 1).toLocaleDateString("en-IN", {
+              month: "long",
+              year: "numeric",
+            })}
+          </p>
+          <TapButton
+            onClick={() =>
+              setCalCursor((c) => {
+                const m = c.month === 11 ? 0 : c.month + 1;
+                const y = c.month === 11 ? c.year + 1 : c.year;
+                return { year: y, month: m };
+              })
+            }
+            className="w-9 h-9 rounded-full flex items-center justify-center bg-zinc-900 border border-zinc-800"
+          >
+            <ChevronRight size={15} className="text-zinc-400" />
+          </TapButton>
+        </div>
 
-      {/* Recent history, expandable by day */}
-      <Card className="mb-4">
-        <p className="text-sm font-medium text-zinc-300 mb-3">Recent history</p>
-        {dayGroups.length === 0 && (
-          <p className="text-xs text-zinc-600">No workouts logged yet.</p>
-        )}
-        <div className="space-y-2">
-          {dayGroups.map(([d, entries]) => {
-            const open = openDay === d;
-            const total = entries.reduce((s, e) => s + e.quantity, 0);
+        <div className="grid grid-cols-7 gap-1 mb-1">
+          {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+            <div key={i} className="text-center text-[10px] text-zinc-600 font-medium py-1">
+              {d}
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7 gap-1">
+          {calGrid.map((dateStr, i) => {
+            if (!dateStr) return <div key={i} />;
+            const isToday = dateStr === todayISO();
+            const isSelected = dateStr === calSelected;
+            const hasLog = loggedDates.has(dateStr);
+            const dayNum = parseInt(dateStr.slice(8, 10), 10);
             return (
-              <div key={d} className="rounded-xl bg-zinc-950/60 border border-zinc-800 overflow-hidden">
-                <TapButton
-                  onClick={() => setOpenDay(open ? null : d)}
-                  className="w-full flex items-center justify-between px-3 py-2.5"
-                >
-                  <span className="text-sm text-zinc-200 font-medium">{prettyDay(d)}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] text-zinc-500">
-                      {entries.length} logged · {total}
-                    </span>
-                    <ChevronDown
-                      size={15}
-                      className={`text-zinc-500 transition-transform ${open ? "rotate-180" : ""}`}
-                    />
-                  </div>
-                </TapButton>
-                {open && (
-                  <div className="px-3 pb-3 space-y-1.5 border-t border-zinc-800 pt-2">
-                    {entries.map((l) => (
-                      <div key={l.id} className="flex items-center justify-between">
-                        <span className="text-sm text-zinc-300">
-                          {l.quantity} {l.exercise}
-                        </span>
-                        <TapButton
-                          onClick={() => deleteLog(l.id)}
-                          className="w-7 h-7 flex items-center justify-center text-zinc-600"
-                        >
-                          <X size={13} />
-                        </TapButton>
-                      </div>
-                    ))}
-                  </div>
+              <TapButton
+                key={dateStr}
+                onClick={() => setCalSelected(dateStr)}
+                className={`aspect-square rounded-xl flex flex-col items-center justify-center text-sm relative border ${
+                  isSelected
+                    ? `${ACCENTS[accent].bgSoft2} ${ACCENTS[accent].borderBright} ${ACCENTS[accent].textBright} font-semibold`
+                    : isToday
+                    ? "border-zinc-600 text-zinc-100"
+                    : "border-transparent text-zinc-400"
+                }`}
+              >
+                {dayNum}
+                {hasLog && (
+                  <span
+                    className={`absolute bottom-1.5 w-1 h-1 rounded-full ${
+                      isSelected ? "bg-zinc-950" : ACCENTS[accent].dot
+                    }`}
+                  />
                 )}
-              </div>
+              </TapButton>
             );
           })}
+        </div>
+
+        <div className="mt-4 pt-4 border-t border-zinc-800 space-y-2">
+          <p className="text-xs font-medium text-zinc-400 mb-2">{prettyDay(calSelected)}</p>
+          {calSelectedResults.length === 0 ? (
+            <p className="text-xs text-zinc-600">Nothing logged on this day.</p>
+          ) : (
+            calSelectedResults.map((l) => (
+              <div
+                key={l.id}
+                className="flex items-center justify-between rounded-xl bg-zinc-950/60 border border-zinc-800 px-3 py-2"
+              >
+                <span className="text-sm text-zinc-200">
+                  {l.quantity} {l.exercise}
+                </span>
+                <TapButton
+                  onClick={() => deleteLog(l.id)}
+                  className="w-7 h-7 flex items-center justify-center text-zinc-600"
+                >
+                  <X size={14} />
+                </TapButton>
+              </div>
+            ))
+          )}
         </div>
       </Card>
 
@@ -1586,13 +1664,6 @@ function SettingsDashboard({ profile, setProfile, accent, onReset }) {
 
   return (
     <div className="pb-6">
-      <SectionHeader
-        icon={SettingsIcon}
-        title="Settings"
-        subtitle="Your profile & preferences"
-        accent={ACCENTS[accent]}
-      />
-
       <Card className="mb-4">
         <div className="flex items-center gap-2 mb-4">
           <User size={16} className={ACCENTS[accent].text} />
@@ -1780,21 +1851,10 @@ export default function App() {
       <div className="studify-root w-full max-w-[480px] min-h-screen bg-zinc-950 relative flex flex-col">
         {/* Top status spacer + header */}
         <div style={{ paddingTop: "env(safe-area-inset-top)" }}>
-          <div className="px-5 pt-4 pb-3 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <StudifyMark size={34} hex={ACCENT_HEX[accent]} />
-              <div>
-                <p className="text-[11px] text-zinc-500">Welcome back</p>
-                <p className="studify-display text-lg font-bold text-zinc-50 tracking-tight">
-                  {data.profile.name || "Aspirant"}
-                </p>
-              </div>
-            </div>
-            <div
-              className={`px-3 py-1.5 rounded-full text-[11px] font-semibold border ${ACCENTS[accent].border} ${ACCENTS[accent].bgSoft} ${ACCENTS[accent].textBright}`}
-            >
+          <div className="px-5 pt-4 pb-3 flex items-center justify-center relative">
+            <p className="studify-display text-base font-bold text-zinc-100 tracking-tight text-center">
               {data.profile.targetExam || "Set target exam"}
-            </div>
+            </p>
           </div>
 
           {!data.installBannerDismissed && (
